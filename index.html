@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>24H GAIA Clock</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="theme-color" content="#111111">
+
+  <!-- iOS: ホーム画面用 -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="24h Clock">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+
+  <style>
+    body{
+      margin:0;
+      height:100vh;
+      display:grid;
+      place-items:center;
+      background:#111;
+      font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    }
+
+    .clock{
+      width:380px;
+      height:380px;
+      border:8px solid #fff;
+      border-radius:50%;
+      position:relative;
+      background:#000;
+      overflow:hidden;
+    }
+
+    /* ===== AM / PM リング ===== */
+    .ampm-ring{
+      position:absolute;
+      inset:14px;
+      border-radius:50%;
+      background: conic-gradient(
+        rgba(80,160,255,0.35) 0deg 180deg,   /* AM */
+        rgba(255,140,80,0.35) 180deg 360deg /* PM */
+      );
+      -webkit-mask: radial-gradient(transparent 64%, #000 66%);
+              mask: radial-gradient(transparent 64%, #000 66%);
+      pointer-events:none;
+      z-index:1;
+    }
+
+    /* ===== 目盛り・数字 ===== */
+    .dial{
+      position:absolute;
+      inset:0;
+      border-radius:50%;
+      pointer-events:none;
+      z-index:2;
+    }
+
+    /* 分目盛り（1分） */
+    .tick.minute{
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:1px;
+      height:8px;
+      background:rgba(255,255,255,0.45);
+      transform-origin: 0 170px;
+      border-radius:1px;
+    }
+
+    /* 5分目盛り */
+    .tick.five{
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:2px;
+      height:12px;
+      background:rgba(255,255,255,0.7);
+      transform-origin: 0 170px;
+      border-radius:2px;
+    }
+
+    /* 時間目盛り（1時間） */
+    .tick.hour{
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:3px;
+      height:18px;
+      background:rgba(255,255,255,0.95);
+      transform-origin: 0 170px;
+      border-radius:2px;
+    }
+
+    /* 0〜23 数字 */
+    .num{
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform: translate(-50%, -50%);
+      color:rgba(255,255,255,0.88);
+      font-size:14px;
+      font-variant-numeric: tabular-nums;
+      user-select:none;
+    }
+    .num.major{
+      font-size:16px;
+      font-weight:700;
+      color:#fff;
+    }
+
+    /* ===== 針 ===== */
+    .hand{
+      position:absolute;
+      bottom:50%;
+      left:50%;
+      transform-origin: bottom;
+      transform: translateX(-50%) rotate(0deg);
+      border-radius:4px;
+      z-index:6;
+    }
+
+    .hour{
+      width:6px;
+      height:95px;
+      background:#ff4d4d;
+//      background:rgba(120,255,180,0.95);
+      z-index:7;
+    }
+
+    .minute{
+      width:4px;
+      height:135px;
+      background:#eee;
+      z-index:8;
+    }
+
+    .second{
+      width:2px;
+      height:155px;
+//      background:#fff;
+      background:rgba(120,255,180,0.95);
+      z-index:9;
+    }
+
+    /* 中心点 */
+    .center{
+      position:absolute;
+      width:12px;
+      height:12px;
+      background:#fff;
+      border-radius:50%;
+      top:50%;
+      left:50%;
+      transform:translate(-50%, -50%);
+      z-index:10;
+      box-shadow:0 0 0 3px rgba(0,0,0,0.6);
+    }
+
+    /* AM / PM ラベル */
+    .labels{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 80px;
+      color:rgba(255,255,255,0.4);
+      font-weight:700;
+      letter-spacing:0.1em;
+      pointer-events:none;
+      z-index:3;
+    }
+    .labels span{ font-size:12px; }
+
+.sectors{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  pointer-events:none; /* クリックを邪魔しない */
+  z-index:4;           /* 文字盤より上・針より下 */
+}
+
+.sectors text.zodiac{
+  fill: rgba(255,255,255,0.9);
+  font-size: 6px;           /* 100x100 viewBox基準 */
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: rgba(0,0,0,0.6);
+  stroke-width: 0.7;
+}
+.sectors path.elem{
+  opacity: 0.95;
+}
+
+.sectors text.elem{
+  fill: rgba(255,255,255,0.95);
+  font-size: 7px;          /* viewBox=100基準 */
+  font-weight: 900;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: rgba(0,0,0,0.35);
+  stroke-width: 0.6;
+}
+.sectors text.elem-earth{
+  font-size: 5px;   /* 通常より少し小さく */
+}
+
+  </style>
+</head>
+
+<body>
+  <div class="clock">
+    <div class="ampm-ring"></div>
+
+ <svg class="sectors" id="sectors" viewBox="0 0 100 100"></svg>
+
+    <div class="dial" id="dial"></div>
+
+    <div class="labels">
+      <span>PM</span>
+      <span>AM</span>
+    </div>
+
+    <div class="hand hour" id="hour"></div>
+    <div class="hand minute" id="minute"></div>
+    <div class="hand second" id="second"></div>
+    <div class="center"></div>
+  </div>
+
+  <script>
+    /* ===== 文字盤生成 ===== */
+    (function buildDial(){
+      const dial = document.getElementById("dial");
+      const tickRadius = 170;
+      const numRadius  = 145;
+
+function meanAngleDeg(degs) {
+  // 角度をベクトル平均で求める（循環対応）
+  const rad = degs.map(d => d * Math.PI / 180);
+  const x = rad.reduce((s,r)=> s + Math.cos(r), 0) / rad.length;
+  const y = rad.reduce((s,r)=> s + Math.sin(r), 0) / rad.length;
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function drawOddHourLines(options = {}) {
+  const svg = document.getElementById("sectors");
+  if (!svg) return;
+
+  // 既存の線を消したくないなら、この2行は消してOK
+  // svg.innerHTML = "";
+  // あるいは、odd-linesグループだけ消す（おすすめ）
+  const old = svg.querySelector('g[data-layer="odd-lines"]');
+  if (old) old.remove();
+
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  g.setAttribute("data-layer", "odd-lines");
+
+  const cx = 50, cy = 50;
+  const rLine = options.rLine ?? 46;     // 線の長さ（外周寄り）
+  const startDeg = options.startDeg ?? -90; // 0時を上に置く（あなたの時計と同じ）
+
+  const pt = (deg, r) => {
+    const rad = (deg * Math.PI) / 180;
+    return { x: cx + Math.cos(rad) * r, y: cy + Math.sin(rad) * r };
+  };
+
+  // 奇数時：1,3,5,...,23
+  for (let h = 1; h < 24; h += 2) {
+    const deg = startDeg + h * 15; // 1時間=15度
+    const p = pt(deg, rLine);
+
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", cx);
+    line.setAttribute("y1", cy);
+    line.setAttribute("x2", p.x);
+    line.setAttribute("y2", p.y);
+
+    // 見た目（太さ/透明度）はここで調整可
+    line.setAttribute("stroke", "rgba(255,255,255,0.45)");
+    line.setAttribute("stroke-width", "0.7");
+
+    g.appendChild(line);
+  }
+
+  svg.appendChild(g);
+}
+
+// 実行（線だけ入れる）
+drawOddHourLines({ rLine: 46, startDeg: -90 });
+
+function placeZodiacLabels(options = {}) {
+  const svg = document.getElementById("sectors");
+  if (!svg) return;
+
+  // 既存の十二支レイヤーがあれば消して作り直し
+  const old = svg.querySelector('g[data-layer="zodiac"]');
+  if (old) old.remove();
+
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  g.setAttribute("data-layer", "zodiac");
+
+  const labels = options.labels ?? ["子","丑","寅","卯","辰","巳","午","未","申","酉","戌","亥"];
+  const cx = 50, cy = 50;
+
+  // 文字を置く半径（大きいほど外側へ）
+  const rText = options.rText ?? 30;
+
+  // 0時を上にしている前提（あなたの時計と同じ）
+  const startDeg = options.startDeg ?? -90;
+
+  // 文字を放射方向に回すか（好み）
+  const rotateText = options.rotateText ?? false;
+
+  const pt = (deg, r) => {
+    const rad = (deg * Math.PI) / 180;
+    return { x: cx + Math.cos(rad) * r, y: cy + Math.sin(rad) * r };
+  };
+
+  // 奇数時の線は 1,3,5,...,23 → 各区間の中央は 0,2,4,...,22 時方向
+  // 角度にすると 0,30,60,...,330（= 12分割）
+  for (let i = 0; i < 12; i++) {
+    const midHour = i * 2;            // 0,2,4,...,22
+    const deg = startDeg + midHour * 15; // 1時間=15度 → 2時間=30度
+    const p = pt(deg, rText);
+
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.textContent = labels[i];
+    text.setAttribute("x", p.x);
+    text.setAttribute("y", p.y);
+    text.setAttribute("class", "zodiac");
+
+    // 文字も放射方向に向けたい場合
+    if (rotateText) {
+      text.setAttribute("transform", `rotate(${deg + 90} ${p.x} ${p.y})`);
+    }
+
+    g.appendChild(text);
+  }
+
+  svg.appendChild(g);
+}
+
+// 実行（子を上、時計回り）
+placeZodiacLabels({ rText: 32, startDeg: -90, rotateText: false });
+
+function drawFiveElements(options = {}) {
+  const svg = document.getElementById("sectors");
+  if (!svg) return;
+
+  // 既存レイヤーを作り直し
+  const old = svg.querySelector('g[data-layer="elements"]');
+  if (old) old.remove();
+
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  g.setAttribute("data-layer", "elements");
+
+  const cx = 50, cy = 50;
+
+  // 放射線と同じ基準（0時を上）
+  const startDeg = options.startDeg ?? -90;
+
+  // 中心付近の「塗りつぶし半径」
+  const rOuter = options.rOuter ?? 24;  // 色面の外側
+  const rInner = options.rInner ?? 6;   // 真ん中は空ける（中心点が見やすい）
+
+  // 文字の配置半径
+  const rText  = options.rText ?? 16;
+
+  // 12セクター（1つ=30度）の「境界」：奇数時の線 = 15,45,...,345度（startDeg基準）
+  // セクターiの中心角：startDeg + i*30（i=0が子）
+  const sectorCenterDeg = (i) => startDeg + i * 30;
+  const sectorStartDeg  = (i) => sectorCenterDeg(i) - 15;
+  const sectorEndDeg    = (i) => sectorCenterDeg(i) + 15;
+
+  const pt = (deg, r) => {
+    const rad = (deg * Math.PI) / 180;
+    return { x: cx + Math.cos(rad) * r, y: cy + Math.sin(rad) * r };
+  };
+
+  // 扇形リング（rInner〜rOuter）パス生成（deg0→deg1）
+  const wedgeRingPath = (deg0, deg1) => {
+    // SVGのarcは「大きい方の弧」を選ぶ可能性があるので、角度差でlarge-arcを決める
+    const norm = (d) => ((d % 360) + 360) % 360;
+    let a0 = norm(deg0), a1 = norm(deg1);
+    // 角度差（0..360）
+    let delta = a1 - a0;
+    if (delta < 0) delta += 360;
+
+    const largeArc = delta > 180 ? 1 : 0;
+
+    const p0o = pt(deg0, rOuter);
+    const p1o = pt(deg1, rOuter);
+    const p1i = pt(deg1, rInner);
+    const p0i = pt(deg0, rInner);
+
+    return [
+      `M ${p0o.x} ${p0o.y}`,
+      `A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${p1o.x} ${p1o.y}`,
+      `L ${p1i.x} ${p1i.y}`,
+      `A ${rInner} ${rInner} 0 ${largeArc} 0 ${p0i.x} ${p0i.y}`,
+      "Z",
+    ].join(" ");
+  };
+
+  // グループ定義（セクターindex配列）
+  const groups = [
+    { key:"水", color: "rgba(120,220,255,0.95)", sectors: [11, 0] },
+    { key:"木", color: "rgba(80,200,120,0.95)",  sectors: [2, 3] },
+    { key:"火", color: "rgba(255,150,70,0.95)",  sectors: [5, 6] },
+    { key:"金", color: "rgba(255,220,80,0.95)",  sectors: [8, 9] },
+    { key:"土", color: "rgba(150,100,60,0.95)",  sectors: [1, 4, 7, 10] },
+  ];
+
+  // セクターindex集合→「連続する角度区間」に分解して描画
+  // （土は飛び飛びなので、4つの扇形になる。文字は中央に1つ置く）
+  for (const gr of groups) {
+    // まず塗り（各セクターごとに描く：簡単・確実）
+    for (const i of gr.sectors) {
+      const d0 = sectorStartDeg(i);
+      const d1 = sectorEndDeg(i);
+
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("class", "elem");
+      path.setAttribute("fill", gr.color);
+      path.setAttribute("d", wedgeRingPath(d0, d1));
+      g.appendChild(path);
+    }
+
+    // 文字の配置
+    if (gr.key === "土") {
+      // 土は4つのセクターそれぞれに「土」を置く（重なり防止）
+      for (const i of gr.sectors) {
+        const d = sectorCenterDeg(i);
+        const p = pt(d, rText);
+
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+// 置換推奨：setAttribute("class", ...) ではなく classList
+	text.classList.add("elem", "elem-earth");
+        text.setAttribute("x", p.x);
+        text.setAttribute("y", p.y);
+        text.textContent = "土";
+        g.appendChild(text);
+      }
+    } else {
+      // それ以外は1グループに1つ表示
+      let labelDeg;
+
+	if (gr.key === "水") {
+    // 水：亥(11)と子(0)の“境界跨ぎの真ん中”
+    labelDeg = meanAngleDeg([sectorCenterDeg(11), sectorCenterDeg(0)]);
+  } else {
+    // 木・火・金：普通に（ここは単純平均でもOKだが、平均関数を使うと今後も安全）
+    labelDeg = meanAngleDeg(gr.sectors.map(sectorCenterDeg));
+  }
+
+      const p = pt(labelDeg, rText);
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("class", "elem");
+      text.setAttribute("x", p.x);
+      text.setAttribute("y", p.y);
+      text.textContent = gr.key;
+      g.appendChild(text);
+    }
+  }
+
+  // 「中心色面」は、目盛りや十二支より“下”にしたいなら先頭に入れるのがコツ
+  // すでに odd-lines / zodiac を描いている場合でも、最後にappendすると“上”になります。
+  // ここでは「線や十二支より下」に置きたいので、svgの先頭に挿入します。
+  svg.insertBefore(g, svg.firstChild);
+}
+
+// 呼び出し（好みで半径調整OK）
+drawFiveElements({ startDeg: -90, rInner: 6, rOuter: 23, rText: 16 });
+
+
+      // 分目盛り（60本）
+      for(let m=0; m<60; m++){
+        const tick = document.createElement("div");
+        if(m % 5 === 0){
+          tick.className = "tick five";
+        }else{
+          tick.className = "tick minute";
+        }
+        const deg = m * 6; // 360 / 60
+        tick.style.transform =
+          `translate(-50%, -${tickRadius}px) rotate(${deg}deg)`;
+        dial.appendChild(tick);
+      }
+
+      // 時間目盛り（24本）
+      for(let h=0; h<24; h++){
+        const tick = document.createElement("div");
+        tick.className = "tick hour";
+        const deg = h * 15; // 360 / 24
+        tick.style.transform =
+          `translate(-50%, -${tickRadius}px) rotate(${deg}deg)`;
+        dial.appendChild(tick);
+      }
+
+      // 数字（0〜23）
+      for(let h=0; h<24; h++){
+        const num = document.createElement("div");
+        num.className = "num" + (h % 6 === 0 ? " major" : "");
+        num.textContent = h;
+
+        const rad = (h * 15 - 90) * Math.PI / 180;
+        const x = Math.cos(rad) * numRadius;
+        const y = Math.sin(rad) * numRadius;
+
+        num.style.transform =
+          `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+        dial.appendChild(num);
+      }
+    })();
+
+    /* ===== 時計更新（スムーズ） ===== */
+    function updateClock(){
+      const now = new Date();
+
+      const ms   = now.getMilliseconds();
+      const sec  = now.getSeconds() + ms / 1000;
+      const min  = now.getMinutes() + sec / 60;
+      const hour = now.getHours() + min / 60; // 24h
+
+      document.getElementById("second").style.transform =
+        `translateX(-50%) rotate(${sec * 6}deg)`;
+      document.getElementById("minute").style.transform =
+        `translateX(-50%) rotate(${min * 6}deg)`;
+      document.getElementById("hour").style.transform =
+        `translateX(-50%) rotate(${hour * 15}deg)`;
+
+      requestAnimationFrame(updateClock);
+    }
+    requestAnimationFrame(updateClock);
+
+    // ===== Service Worker 登録（https or localhost が必要）=====
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch(console.error);
+      });
+    }
+
+  </script>
+</body>
+</html>
